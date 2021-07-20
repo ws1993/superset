@@ -14,8 +14,10 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+from __future__ import annotations
+
 import logging
-from typing import Any, ClassVar, Dict, List, Optional, Union
+from typing import Any, ClassVar, Dict, List, Optional, TYPE_CHECKING, Union
 
 import numpy as np
 import pandas as pd
@@ -34,7 +36,7 @@ from superset.exceptions import (
     SupersetException,
 )
 from superset.extensions import cache_manager, security_manager
-from superset.stats_logger import BaseStatsLogger
+from superset.utils import csv
 from superset.utils.cache import generate_cache_key, set_and_log_cache
 from superset.utils.core import (
     ChartDataResultFormat,
@@ -48,6 +50,9 @@ from superset.utils.core import (
     QueryStatus,
 )
 from superset.views.utils import get_viz
+
+if TYPE_CHECKING:
+    from superset.stats_logger import BaseStatsLogger
 
 config = app.config
 stats_logger: BaseStatsLogger = config["STATS_LOGGER"]
@@ -119,7 +124,7 @@ class QueryContext:
         # If the datetime format is unix, the parse will use the corresponding
         # parsing logic
         if not df.empty:
-            df = normalize_dttm_col(
+            normalize_dttm_col(
                 df=df,
                 timestamp_format=timestamp_format,
                 offset=self.datasource.offset,
@@ -129,7 +134,7 @@ class QueryContext:
             if self.enforce_numerical_metrics:
                 self.df_metrics_to_num(df, query_object)
 
-            df.replace([np.inf, -np.inf], np.nan)
+            df.replace([np.inf, -np.inf], np.nan, inplace=True)
             df = query_object.exec_post_processing(df)
 
         return {
@@ -151,7 +156,9 @@ class QueryContext:
     def get_data(self, df: pd.DataFrame,) -> Union[str, List[Dict[str, Any]]]:
         if self.result_format == ChartDataResultFormat.CSV:
             include_index = not isinstance(df.index, pd.RangeIndex)
-            result = df.to_csv(index=include_index, **config["CSV_EXPORT"])
+            result = csv.df_to_escaped_csv(
+                df, index=include_index, **config["CSV_EXPORT"]
+            )
             return result or ""
 
         return df.to_dict(orient="records")
@@ -329,7 +336,9 @@ class QueryContext:
                 except KeyError as ex:
                     logger.exception(ex)
                     logger.error(
-                        "Error reading cache: %s", error_msg_from_exception(ex)
+                        "Error reading cache: %s",
+                        error_msg_from_exception(ex),
+                        exc_info=True,
                     )
                 logger.info("Serving from cache")
 
@@ -345,7 +354,7 @@ class QueryContext:
                     col
                     for col in query_obj.columns
                     + query_obj.groupby
-                    + get_column_names_from_metrics(query_obj.metrics)
+                    + get_column_names_from_metrics(query_obj.metrics or [])
                     if col not in self.datasource.column_names and col != DTTM_ALIAS
                 ]
                 if invalid_columns:

@@ -16,27 +16,61 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import { buildQueryContext, QueryFormData } from '@superset-ui/core';
+import {
+  buildQueryContext,
+  GenericDataType,
+  QueryObject,
+  QueryObjectFilterClause,
+} from '@superset-ui/core';
+import { BuildQuery } from '@superset-ui/core/lib/chart/registries/ChartBuildQueryRegistrySingleton';
+import { DEFAULT_FORM_DATA, PluginFilterSelectQueryFormData } from './types';
 
-/**
- * The buildQuery function is used to create an instance of QueryContext that's
- * sent to the chart data endpoint. In addition to containing information of which
- * datasource to use, it specifies the type (e.g. full payload, samples, query) and
- * format (e.g. CSV or JSON) of the result and whether or not to force refresh the data from
- * the datasource as opposed to using a cached copy of the data, if available.
- *
- * More importantly though, QueryContext contains a property `queries`, which is an array of
- * QueryObjects specifying individual data requests to be made. A QueryObject specifies which
- * columns, metrics and filters, among others, to use during the query. Usually it will be enough
- * to specify just one query based on the baseQueryObject, but for some more advanced use cases
- * it is possible to define post processing operations in the QueryObject, or multiple queries
- * if a viz needs multiple different result sets.
- */
-export default function buildQuery(formData: QueryFormData) {
-  return buildQueryContext(formData, baseQueryObject => [
-    {
-      ...baseQueryObject,
-      groupby: baseQueryObject.columns,
-    },
-  ]);
-}
+const buildQuery: BuildQuery<PluginFilterSelectQueryFormData> = (
+  formData: PluginFilterSelectQueryFormData,
+  options,
+) => {
+  const { search, coltypeMap } = options?.ownState || {};
+  const { sortAscending, sortMetric } = { ...DEFAULT_FORM_DATA, ...formData };
+  return buildQueryContext(formData, baseQueryObject => {
+    const { columns = [], filters = [] } = baseQueryObject;
+    const extraFilters: QueryObjectFilterClause[] = [];
+    if (search) {
+      columns.forEach(column => {
+        if (coltypeMap[column] === GenericDataType.STRING) {
+          extraFilters.push({
+            col: column,
+            op: 'ILIKE',
+            val: `%${search}%`,
+          });
+        } else if (
+          coltypeMap[column] === GenericDataType.NUMERIC &&
+          !Number.isNaN(Number(search))
+        ) {
+          // for numeric columns we apply a >= where clause
+          extraFilters.push({
+            col: column,
+            op: '>=',
+            val: Number(search),
+          });
+        }
+      });
+    }
+
+    const sortColumns = sortMetric ? [sortMetric] : columns;
+    const query: QueryObject[] = [
+      {
+        ...baseQueryObject,
+        groupby: columns,
+        metrics: sortMetric ? [sortMetric] : [],
+        filters: filters.concat(extraFilters),
+        orderby:
+          sortMetric || sortAscending !== undefined
+            ? sortColumns.map(column => [column, !!sortAscending])
+            : [],
+      },
+    ];
+    return query;
+  });
+};
+
+export default buildQuery;

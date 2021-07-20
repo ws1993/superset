@@ -17,14 +17,21 @@
  * under the License.
  */
 
-import { ExtraFormData, makeApi } from '@superset-ui/core';
+import { makeApi } from '@superset-ui/core';
 import { Dispatch } from 'redux';
 import { FilterConfiguration } from 'src/dashboard/components/nativeFilters/types';
+import { DataMaskType, DataMaskStateWithId } from 'src/dataMask/types';
+import {
+  SET_DATA_MASK_FOR_FILTER_CONFIG_FAIL,
+  setDataMaskForFilterConfigComplete,
+} from 'src/dataMask/actions';
+import { HYDRATE_DASHBOARD } from './hydrate';
 import { dashboardInfoChanged } from './dashboardInfo';
 import {
-  CurrentFilterState,
-  FiltersSet,
-  NativeFilterState,
+  DashboardInfo,
+  Filters,
+  FilterSet,
+  FilterSets,
 } from '../reducers/types';
 
 export const SET_FILTER_CONFIG_BEGIN = 'SET_FILTER_CONFIG_BEGIN';
@@ -42,26 +49,26 @@ export interface SetFilterConfigFail {
   type: typeof SET_FILTER_CONFIG_FAIL;
   filterConfig: FilterConfiguration;
 }
+export const SET_IN_SCOPE_STATUS_OF_FILTERS = 'SET_IN_SCOPE_STATUS_OF_FILTERS';
+export interface SetInScopeStatusOfFilters {
+  type: typeof SET_IN_SCOPE_STATUS_OF_FILTERS;
+  filterConfig: FilterConfiguration;
+}
 export const SET_FILTER_SETS_CONFIG_BEGIN = 'SET_FILTER_SETS_CONFIG_BEGIN';
 export interface SetFilterSetsConfigBegin {
   type: typeof SET_FILTER_SETS_CONFIG_BEGIN;
-  filterSetsConfig: FiltersSet[];
+  filterSetsConfig: FilterSet[];
 }
 export const SET_FILTER_SETS_CONFIG_COMPLETE =
   'SET_FILTER_SETS_CONFIG_COMPLETE';
 export interface SetFilterSetsConfigComplete {
   type: typeof SET_FILTER_SETS_CONFIG_COMPLETE;
-  filterSetsConfig: FiltersSet[];
+  filterSetsConfig: FilterSet[];
 }
 export const SET_FILTER_SETS_CONFIG_FAIL = 'SET_FILTER_SETS_CONFIG_FAIL';
 export interface SetFilterSetsConfigFail {
   type: typeof SET_FILTER_SETS_CONFIG_FAIL;
-  filterSetsConfig: FiltersSet[];
-}
-
-interface DashboardInfo {
-  id: number;
-  json_metadata: string;
+  filterSetsConfig: FilterSet[];
 }
 
 export const setFilterConfiguration = (
@@ -72,6 +79,7 @@ export const setFilterConfiguration = (
     filterConfig,
   });
   const { id, metadata } = getState().dashboardInfo;
+  const oldFilters = getState().nativeFilters?.filters;
 
   // TODO extract this out when makeApi supports url parameters
   const updateDashboard = makeApi<
@@ -82,11 +90,19 @@ export const setFilterConfiguration = (
     endpoint: `/api/v1/dashboard/${id}`,
   });
 
+  const mergedFilterConfig = filterConfig.map(filter => {
+    const oldFilter = oldFilters[filter.id];
+    if (!oldFilter) {
+      return filter;
+    }
+    return { ...oldFilter, ...filter };
+  });
+
   try {
     const response = await updateDashboard({
       json_metadata: JSON.stringify({
         ...metadata,
-        filter_configuration: filterConfig,
+        native_filter_configuration: mergedFilterConfig,
       }),
     });
     dispatch(
@@ -96,15 +112,57 @@ export const setFilterConfiguration = (
     );
     dispatch({
       type: SET_FILTER_CONFIG_COMPLETE,
-      filterConfig,
+      filterConfig: mergedFilterConfig,
     });
+    dispatch(
+      setDataMaskForFilterConfigComplete(mergedFilterConfig, oldFilters),
+    );
   } catch (err) {
-    dispatch({ type: SET_FILTER_CONFIG_FAIL, filterConfig });
+    dispatch({
+      type: SET_FILTER_CONFIG_FAIL,
+      filterConfig: mergedFilterConfig,
+    });
+    dispatch({
+      type: SET_DATA_MASK_FOR_FILTER_CONFIG_FAIL,
+      filterConfig: mergedFilterConfig,
+    });
   }
 };
 
+export const setInScopeStatusOfFilters = (
+  filterScopes: {
+    filterId: string;
+    chartsInScope: number[];
+    tabsInScope: string[];
+  }[],
+) => async (dispatch: Dispatch, getState: () => any) => {
+  const filters = getState().nativeFilters?.filters;
+  const filtersWithScopes = filterScopes.map(scope => ({
+    ...filters[scope.filterId],
+    chartsInScope: scope.chartsInScope,
+    tabsInScope: scope.tabsInScope,
+  }));
+  dispatch({
+    type: SET_IN_SCOPE_STATUS_OF_FILTERS,
+    filterConfig: filtersWithScopes,
+  });
+};
+
+type BootstrapData = {
+  nativeFilters: {
+    filters: Filters;
+    filterSets: FilterSets;
+    filtersState: object;
+  };
+};
+
+export interface SetBootstrapData {
+  type: typeof HYDRATE_DASHBOARD;
+  data: BootstrapData;
+}
+
 export const setFilterSetsConfiguration = (
-  filterSetsConfig: FiltersSet[],
+  filterSetsConfig: FilterSet[],
 ) => async (dispatch: Dispatch, getState: () => any) => {
   dispatch({
     type: SET_FILTER_SETS_CONFIG_BEGIN,
@@ -128,80 +186,61 @@ export const setFilterSetsConfiguration = (
         filter_sets_configuration: filterSetsConfig,
       }),
     });
+    const newMetadata = JSON.parse(response.result.json_metadata);
     dispatch(
       dashboardInfoChanged({
-        metadata: JSON.parse(response.result.json_metadata),
+        metadata: newMetadata,
       }),
     );
     dispatch({
       type: SET_FILTER_SETS_CONFIG_COMPLETE,
-      filterSetsConfig,
+      filterSetsConfig: newMetadata?.filter_sets_configuration,
     });
   } catch (err) {
     dispatch({ type: SET_FILTER_SETS_CONFIG_FAIL, filterSetsConfig });
   }
 };
 
-export const SET_EXTRA_FORM_DATA = 'SET_EXTRA_FORM_DATA';
-export interface SetExtraFormData {
-  type: typeof SET_EXTRA_FORM_DATA;
-  filterId: string;
-  extraFormData: ExtraFormData;
-  currentState: CurrentFilterState;
-}
-
 export const SAVE_FILTER_SETS = 'SAVE_FILTER_SETS';
 export interface SaveFilterSets {
   type: typeof SAVE_FILTER_SETS;
   name: string;
-  filtersState: NativeFilterState;
+  dataMask: Pick<DataMaskStateWithId, DataMaskType.NativeFilters>;
   filtersSetId: string;
-}
-
-export const SET_FILTERS_STATE = 'SET_FILTERS_STATE';
-export interface SetFiltersState {
-  type: typeof SET_FILTERS_STATE;
-  filtersState: NativeFilterState;
-}
-
-/**
- * Sets the selected option(s) for a given filter
- * @param filterId the id of the native filter
- * @param extraFormData the selection translated into extra form data
- * @param currentState
- */
-export function setExtraFormData(
-  filterId: string,
-  extraFormData: ExtraFormData,
-  currentState: CurrentFilterState,
-): SetExtraFormData {
-  return {
-    type: SET_EXTRA_FORM_DATA,
-    filterId,
-    extraFormData,
-    currentState,
-  };
 }
 
 export function saveFilterSets(
   name: string,
   filtersSetId: string,
-  filtersState: NativeFilterState,
+  dataMask: Pick<DataMaskStateWithId, DataMaskType.NativeFilters>,
 ): SaveFilterSets {
   return {
     type: SAVE_FILTER_SETS,
     name,
     filtersSetId,
-    filtersState,
+    dataMask,
   };
 }
 
-export function setFiltersState(
-  filtersState: NativeFilterState,
-): SetFiltersState {
+export const SET_FOCUSED_NATIVE_FILTER = 'SET_FOCUSED_NATIVE_FILTER';
+export interface SetFocusedNativeFilter {
+  type: typeof SET_FOCUSED_NATIVE_FILTER;
+  id: string;
+}
+export const UNSET_FOCUSED_NATIVE_FILTER = 'UNSET_FOCUSED_NATIVE_FILTER';
+export interface UnsetFocusedNativeFilter {
+  type: typeof UNSET_FOCUSED_NATIVE_FILTER;
+}
+
+export function setFocusedNativeFilter(id: string): SetFocusedNativeFilter {
   return {
-    type: SET_FILTERS_STATE,
-    filtersState,
+    type: SET_FOCUSED_NATIVE_FILTER,
+    id,
+  };
+}
+export function unsetFocusedNativeFilter(): UnsetFocusedNativeFilter {
+  return {
+    type: UNSET_FOCUSED_NATIVE_FILTER,
   };
 }
 
@@ -212,6 +251,8 @@ export type AnyFilterAction =
   | SetFilterSetsConfigBegin
   | SetFilterSetsConfigComplete
   | SetFilterSetsConfigFail
-  | SetFiltersState
-  | SetExtraFormData
-  | SaveFilterSets;
+  | SetInScopeStatusOfFilters
+  | SaveFilterSets
+  | SetBootstrapData
+  | SetFocusedNativeFilter
+  | UnsetFocusedNativeFilter;

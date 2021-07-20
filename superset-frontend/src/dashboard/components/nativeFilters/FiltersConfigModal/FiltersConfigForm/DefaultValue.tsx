@@ -16,66 +16,74 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import React, { FC } from 'react';
-import { t, SuperChart } from '@superset-ui/core';
+import React, { FC, useEffect, useState } from 'react';
+import {
+  Behavior,
+  SetDataMaskHook,
+  SuperChart,
+  AppSection,
+  t,
+} from '@superset-ui/core';
 import { FormInstance } from 'antd/lib/form';
-import { setFilterFieldValues, useForceUpdate } from './utils';
-import { StyledFormItem, StyledLabel } from './FiltersConfigForm';
-import { Filter } from '../../types';
+import Loading from 'src/components/Loading';
 import { NativeFiltersForm } from '../types';
 import { getFormData } from '../../utils';
 
 type DefaultValueProps = {
+  hasDefaultValue: boolean;
   filterId: string;
-  hasFilledDatasource: boolean;
-  hasDatasource: boolean;
-  filterToEdit?: Filter;
+  setDataMask: SetDataMaskHook;
+  hasDataset: boolean;
   form: FormInstance<NativeFiltersForm>;
   formData: ReturnType<typeof getFormData>;
+  enableNoResults: boolean;
 };
 
 const DefaultValue: FC<DefaultValueProps> = ({
+  hasDefaultValue,
   filterId,
-  hasFilledDatasource,
-  hasDatasource,
-  filterToEdit,
+  hasDataset,
   form,
+  setDataMask,
   formData,
+  enableNoResults,
 }) => {
-  const forceUpdate = useForceUpdate();
+  const [loading, setLoading] = useState(hasDataset);
   const formFilter = (form.getFieldValue('filters') || {})[filterId];
-  return (
-    <StyledFormItem
-      name={['filters', filterId, 'defaultValue']}
-      initialValue={filterToEdit?.defaultValue}
-      data-test="default-input"
-      label={<StyledLabel>{t('Default Value')}</StyledLabel>}
-    >
-      {((hasFilledDatasource && formFilter?.defaultValueQueriesData) ||
-        !hasDatasource) && (
-        <SuperChart
-          height={25}
-          width={250}
-          formData={formData}
-          // For charts that don't have datasource we need workaround for empty placeholder
-          queriesData={
-            hasDatasource
-              ? formFilter?.defaultValueQueriesData
-              : [{ data: [null] }]
-          }
-          chartType={formFilter?.filterType}
-          hooks={{
-            // @ts-ignore (fixed in other PR)
-            setExtraFormData: ({ currentState }) => {
-              setFilterFieldValues(form, filterId, {
-                defaultValue: currentState?.value,
-              });
-              forceUpdate();
-            },
-          }}
-        />
-      )}
-    </StyledFormItem>
+  const queriesData = formFilter?.defaultValueQueriesData;
+
+  useEffect(() => {
+    if (!hasDataset || queriesData !== null) {
+      setLoading(false);
+    } else {
+      setLoading(true);
+    }
+  }, [hasDataset, queriesData]);
+  const value = formFilter.defaultDataMask?.filterState.value;
+  const isMissingRequiredValue =
+    hasDefaultValue && (value === null || value === undefined);
+  return loading ? (
+    <Loading position="inline-centered" />
+  ) : (
+    <SuperChart
+      height={32}
+      width={formFilter?.filterType === 'filter_time' ? 350 : 250}
+      appSection={AppSection.FILTER_CONFIG_MODAL}
+      behaviors={[Behavior.NATIVE_FILTER]}
+      formData={formData}
+      // For charts that don't have datasource we need workaround for empty placeholder
+      queriesData={
+        hasDataset ? formFilter?.defaultValueQueriesData : [{ data: [{}] }]
+      }
+      chartType={formFilter?.filterType}
+      hooks={{ setDataMask }}
+      enableNoResults={enableNoResults}
+      filterState={{
+        ...formFilter.defaultDataMask?.filterState,
+        validateMessage: isMissingRequiredValue && t('Value is required'),
+        validateStatus: isMissingRequiredValue && 'error',
+      }}
+    />
   );
 };
 

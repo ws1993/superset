@@ -16,100 +16,326 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import { styled } from '@superset-ui/core';
-import React, { useEffect, useState } from 'react';
+/* eslint-disable no-param-reassign */
+import {
+  AppSection,
+  DataMask,
+  DataRecord,
+  ensureIsArray,
+  ExtraFormData,
+  GenericDataType,
+  JsonObject,
+  smartDateDetailedFormatter,
+  t,
+  tn,
+} from '@superset-ui/core';
+import React, {
+  RefObject,
+  ReactElement,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react';
 import { Select } from 'src/common/components';
-import { PluginFilterSelectProps } from './types';
-import { PluginFilterStylesProps } from '../types';
-import { getSelectExtraFormData } from '../../utils';
-
-const Styles = styled.div<PluginFilterStylesProps>`
-  height: ${({ height }) => height};
-  width: ${({ width }) => width};
-`;
+import debounce from 'lodash/debounce';
+import { SLOW_DEBOUNCE } from 'src/constants';
+import { useImmerReducer } from 'use-immer';
+import Icons from 'src/components/Icons';
+import { usePrevious } from 'src/common/hooks/usePrevious';
+import { FormItemProps } from 'antd/lib/form';
+import { PluginFilterSelectProps, SelectValue } from './types';
+import { StyledFormItem, StyledSelect, Styles, StatusMessage } from '../common';
+import { getDataRecordFormatter, getSelectExtraFormData } from '../../utils';
 
 const { Option } = Select;
 
+type DataMaskAction =
+  | { type: 'ownState'; ownState: JsonObject }
+  | {
+      type: 'filterState';
+      __cache: JsonObject;
+      extraFormData: ExtraFormData;
+      filterState: { value: SelectValue; label?: string };
+    };
+
+function reducer(
+  draft: DataMask & { __cache?: JsonObject },
+  action: DataMaskAction,
+) {
+  switch (action.type) {
+    case 'ownState':
+      draft.ownState = {
+        ...draft.ownState,
+        ...action.ownState,
+      };
+      return draft;
+    case 'filterState':
+      draft.extraFormData = action.extraFormData;
+      // eslint-disable-next-line no-underscore-dangle
+      draft.__cache = action.__cache;
+      draft.filterState = { ...draft.filterState, ...action.filterState };
+      return draft;
+    default:
+      return draft;
+  }
+}
+
 export default function PluginFilterSelect(props: PluginFilterSelectProps) {
-  const { data, formData, height, width, setExtraFormData } = props;
   const {
-    defaultValue,
+    coltypeMap,
+    data,
+    filterState,
+    formData,
+    height,
+    isRefreshing,
+    width,
+    setDataMask,
+    setFocusedFilter,
+    unsetFocusedFilter,
+    appSection,
+  } = props;
+  const {
     enableEmptyFilter,
     multiSelect,
     showSearch,
-    currentValue,
     inverseSelection,
     inputRef,
+    defaultToFirstItem,
+    searchAllOptions,
   } = formData;
-
-  const [values, setValues] = useState<(string | number)[]>(defaultValue ?? []);
-
-  let { groupby = [] } = formData;
-  groupby = Array.isArray(groupby) ? groupby : [groupby];
-
-  const handleChange = (
-    value?: (number | string)[] | number | string | null,
-  ) => {
-    let resultValue: (number | string)[];
-    // Works only with arrays even for single select
-    if (!Array.isArray(value)) {
-      resultValue = value ? [value] : [];
-    } else {
-      resultValue = value;
-    }
-    setValues(resultValue);
-    const [col] = groupby;
-    const emptyFilter =
-      enableEmptyFilter && !inverseSelection && resultValue?.length === 0;
-    setExtraFormData({
-      extraFormData: getSelectExtraFormData(
-        col,
-        resultValue,
-        emptyFilter,
-        inverseSelection,
-      ),
-      currentState: {
-        value: resultValue.length ? resultValue : null,
-      },
+  const groupby = ensureIsArray<string>(formData.groupby);
+  const [col] = groupby;
+  const [initialColtypeMap] = useState(coltypeMap);
+  const [selectedValues, setSelectedValues] = useState<SelectValue>(
+    filterState.value,
+  );
+  const sortedData = useMemo(() => {
+    const firstData: DataRecord[] = [];
+    const restData: DataRecord[] = [];
+    data.forEach(row => {
+      // @ts-ignore
+      if (selectedValues?.includes(row[col])) {
+        firstData.push(row);
+      } else {
+        restData.push(row);
+      }
     });
+    return [...firstData, ...restData];
+  }, [col, selectedValues, data]);
+  const [isDropdownVisible, setIsDropdownVisible] = useState(false);
+  const wasDropdownVisible = usePrevious(isDropdownVisible);
+  const [currentSuggestionSearch, setCurrentSuggestionSearch] = useState('');
+  const [dataMask, dispatchDataMask] = useImmerReducer(reducer, {
+    extraFormData: {},
+    filterState,
+  });
+  const updateDataMask = useCallback(
+    (values: SelectValue) => {
+      const emptyFilter =
+        enableEmptyFilter && !inverseSelection && !values?.length;
+
+      const suffix =
+        inverseSelection && values?.length ? ` (${t('excluded')})` : '';
+
+      dispatchDataMask({
+        type: 'filterState',
+        __cache: filterState,
+        extraFormData: getSelectExtraFormData(
+          col,
+          values,
+          emptyFilter,
+          inverseSelection,
+        ),
+        filterState: {
+          ...filterState,
+          label: values?.length
+            ? `${(values || []).join(', ')}${suffix}`
+            : undefined,
+          value:
+            appSection === AppSection.FILTER_CONFIG_MODAL && defaultToFirstItem
+              ? undefined
+              : values,
+        },
+      });
+    },
+    [
+      appSection,
+      col,
+      defaultToFirstItem,
+      dispatchDataMask,
+      enableEmptyFilter,
+      inverseSelection,
+      JSON.stringify(filterState),
+    ],
+  );
+
+  useEffect(() => {
+    if (!isDropdownVisible) {
+      setSelectedValues(filterState.value);
+    }
+    updateDataMask(filterState.value);
+  }, [JSON.stringify(filterState.value)]);
+
+  const isDisabled =
+    appSection === AppSection.FILTER_CONFIG_MODAL && defaultToFirstItem;
+
+  const debouncedOwnStateFunc = useCallback(
+    debounce((val: string) => {
+      dispatchDataMask({
+        type: 'ownState',
+        ownState: {
+          coltypeMap: initialColtypeMap,
+          search: val,
+        },
+      });
+    }, SLOW_DEBOUNCE),
+    [],
+  );
+
+  const searchWrapper = (val: string) => {
+    if (searchAllOptions) {
+      debouncedOwnStateFunc(val);
+    }
+    setCurrentSuggestionSearch(val);
+  };
+
+  const clearSuggestionSearch = () => {
+    setCurrentSuggestionSearch('');
+    if (searchAllOptions) {
+      dispatchDataMask({
+        type: 'ownState',
+        ownState: {
+          coltypeMap: initialColtypeMap,
+          search: null,
+        },
+      });
+    }
+  };
+
+  const handleBlur = () => {
+    clearSuggestionSearch();
+    unsetFocusedFilter();
+    setSelectedValues(filterState.value);
+  };
+
+  const datatype: GenericDataType = coltypeMap[col];
+  const labelFormatter = getDataRecordFormatter({
+    timeFormatter: smartDateDetailedFormatter,
+  });
+
+  const handleChange = (value?: SelectValue | number | string) => {
+    const values = ensureIsArray(value);
+    if (values.length === 0) {
+      updateDataMask(null);
+    } else {
+      updateDataMask(values);
+    }
   };
 
   useEffect(() => {
-    handleChange(currentValue ?? []);
-  }, [JSON.stringify(currentValue)]);
+    if (defaultToFirstItem && filterState.value === undefined) {
+      // initialize to first value if set to default to first item
+      const firstItem: SelectValue = data[0]
+        ? (groupby.map(col => data[0][col]) as string[])
+        : null;
+      // firstItem[0] !== undefined for a case when groupby changed but new data still not fetched
+      // TODO: still need repopulate default value in config modal when column changed
+      if (firstItem && firstItem[0] !== undefined) {
+        updateDataMask(firstItem);
+      }
+    } else if (isDisabled) {
+      // empty selection if filter is disabled
+      updateDataMask(null);
+    } else {
+      // reset data mask based on filter state
+      updateDataMask(filterState.value);
+    }
+  }, [
+    col,
+    isDisabled,
+    defaultToFirstItem,
+    enableEmptyFilter,
+    inverseSelection,
+    updateDataMask,
+    data,
+    groupby,
+    JSON.stringify(filterState),
+  ]);
 
   useEffect(() => {
-    handleChange(defaultValue ?? []);
-    // I think after Config Modal update some filter it re-creates default value for all other filters
-    // so we can process it like this `JSON.stringify` or start to use `Immer`
-  }, [JSON.stringify(defaultValue)]);
+    setDataMask(dataMask);
+  }, [JSON.stringify(dataMask)]);
 
   const placeholderText =
-    (data || []).length === 0
-      ? 'No data'
-      : `${data.length} option${data.length > 1 ? 's' : 0}`;
+    data.length === 0
+      ? t('No data')
+      : tn('%s option', '%s options', data.length, data.length);
+  const Icon = inverseSelection ? Icons.StopOutlined : Icons.CheckOutlined;
+
+  const formItemData: FormItemProps = {};
+  if (filterState.validateMessage) {
+    formItemData.extra = (
+      <StatusMessage status={filterState.validateStatus}>
+        {filterState.validateMessage}
+      </StatusMessage>
+    );
+  }
+
   return (
     <Styles height={height} width={width}>
-      <Select
-        allowClear
-        value={values}
-        showSearch={showSearch}
-        style={{ width: '100%' }}
-        mode={multiSelect ? 'multiple' : undefined}
-        placeholder={placeholderText}
-        // @ts-ignore
-        onChange={handleChange}
-        ref={inputRef}
+      <StyledFormItem
+        validateStatus={filterState.validateStatus}
+        {...formItemData}
       >
-        {(data || []).map(row => {
-          const option = `${groupby.map(col => row[col])[0]}`;
-          return (
-            <Option key={option} value={option}>
-              {option}
-            </Option>
-          );
-        })}
-      </Select>
+        <StyledSelect
+          allowClear
+          // @ts-ignore
+          value={filterState.value || []}
+          disabled={isDisabled}
+          showSearch={showSearch}
+          mode={multiSelect ? 'multiple' : undefined}
+          placeholder={placeholderText}
+          onSearch={searchWrapper}
+          onSelect={clearSuggestionSearch}
+          onBlur={handleBlur}
+          onDropdownVisibleChange={setIsDropdownVisible}
+          dropdownRender={(
+            originNode: ReactElement & { ref?: RefObject<HTMLElement> },
+          ) => {
+            if (isDropdownVisible && !wasDropdownVisible) {
+              originNode.ref?.current?.scrollTo({ top: 0 });
+            }
+            return originNode;
+          }}
+          onMouseEnter={setFocusedFilter}
+          onMouseLeave={unsetFocusedFilter}
+          // @ts-ignore
+          onChange={handleChange}
+          ref={inputRef}
+          loading={isRefreshing}
+          maxTagCount={5}
+          menuItemSelectedIcon={<Icon iconSize="m" />}
+        >
+          {sortedData.map(row => {
+            const [value] = groupby.map(col => row[col]);
+            return (
+              // @ts-ignore
+              <Option key={`${value}`} value={value}>
+                {labelFormatter(value, datatype)}
+              </Option>
+            );
+          })}
+          {currentSuggestionSearch &&
+            !ensureIsArray(filterState.value).some(
+              suggestion => suggestion === currentSuggestionSearch,
+            ) && (
+              <Option value={currentSuggestionSearch}>
+                {`${t('Create "%s"', currentSuggestionSearch)}`}
+              </Option>
+            )}
+        </StyledSelect>
+      </StyledFormItem>
     </Styles>
   );
 }

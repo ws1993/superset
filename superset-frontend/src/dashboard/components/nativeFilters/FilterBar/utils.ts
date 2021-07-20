@@ -1,7 +1,3 @@
-import shortid from 'shortid';
-import { Filter } from '../types';
-import { CascadeFilter } from './types';
-
 /**
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
@@ -21,6 +17,16 @@ import { CascadeFilter } from './types';
  * under the License.
  */
 
+import { DataMaskStateWithId } from 'src/dataMask/types';
+import { areObjectsEqual } from 'src/reduxUtils';
+import { FilterState } from '@superset-ui/core';
+import { Filter } from '../types';
+
+export enum TabIds {
+  AllFilters = 'allFilters',
+  FilterSets = 'filterSets',
+}
+
 export function mapParentFiltersToChildren(
   filters: Filter[],
 ): { [id: string]: Filter[] } {
@@ -37,20 +43,44 @@ export function mapParentFiltersToChildren(
   return cascadeChildren;
 }
 
-export function buildCascadeFiltersTree(filters: Filter[]): CascadeFilter[] {
-  const cascadeChildren = mapParentFiltersToChildren(filters);
+export const getOnlyExtraFormData = (data: DataMaskStateWithId) =>
+  Object.values(data).reduce(
+    (prev, next) => ({ ...prev, [next.id]: next.extraFormData }),
+    {},
+  );
 
-  const getCascadeFilter = (filter: Filter): CascadeFilter => {
-    const children = cascadeChildren[filter.id] || [];
-    return {
-      ...filter,
-      cascadeChildren: children.map(getCascadeFilter),
-    };
-  };
+export const checkIsMissingRequiredValue = (
+  filter: Filter,
+  filterState?: FilterState,
+) => {
+  const value = filterState?.value;
+  // TODO: this property should be unhardcoded
+  return (
+    filter.controlValues.enableEmptyFilter &&
+    (value === null || value === undefined)
+  );
+};
 
-  return filters
-    .filter(filter => !filter.cascadeParentIds?.length)
-    .map(getCascadeFilter);
-}
+export const checkIsApplyDisabled = (
+  dataMaskSelected: DataMaskStateWithId,
+  dataMaskApplied: DataMaskStateWithId,
+  filters: Filter[],
+) => {
+  const dataSelectedValues = Object.values(dataMaskSelected);
+  const dataAppliedValues = Object.values(dataMaskApplied);
 
-export const generateFiltersSetId = () => `FILTERS_SET-${shortid.generate()}`;
+  return (
+    areObjectsEqual(
+      getOnlyExtraFormData(dataMaskSelected),
+      getOnlyExtraFormData(dataMaskApplied),
+      { ignoreUndefined: true },
+    ) ||
+    dataSelectedValues.length !== dataAppliedValues.length ||
+    filters.some(filter =>
+      checkIsMissingRequiredValue(
+        filter,
+        dataMaskSelected?.[filter?.id]?.filterState,
+      ),
+    )
+  );
+};

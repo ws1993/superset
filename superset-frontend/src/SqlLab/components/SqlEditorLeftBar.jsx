@@ -20,9 +20,11 @@ import React from 'react';
 import PropTypes from 'prop-types';
 import Button from 'src/components/Button';
 import { t, styled, css } from '@superset-ui/core';
-import Collapse from 'src/common/components/Collapse';
+import Collapse from 'src/components/Collapse';
+import Icons from 'src/components/Icons';
 import TableElement from './TableElement';
 import TableSelector from '../../components/TableSelector';
+import { IconTooltip } from '../../components/IconTooltip';
 
 const propTypes = {
   queryEditor: PropTypes.object.isRequired,
@@ -59,6 +61,7 @@ export default class SqlEditorLeftBar extends React.PureComponent {
     this.onDbChange = this.onDbChange.bind(this);
     this.getDbList = this.getDbList.bind(this);
     this.onTableChange = this.onTableChange.bind(this);
+    this.onToggleTable = this.onToggleTable.bind(this);
   }
 
   onSchemaChange(schema) {
@@ -89,6 +92,16 @@ export default class SqlEditorLeftBar extends React.PureComponent {
 
   onTableChange(tableName, schemaName) {
     this.props.actions.addTable(this.props.queryEditor, tableName, schemaName);
+  }
+
+  onToggleTable(tables) {
+    this.props.tables.forEach(table => {
+      if (!tables.includes(table.id.toString()) && table.expanded) {
+        this.props.actions.collapseTable(table);
+      } else if (tables.includes(table.id.toString()) && !table.expanded) {
+        this.props.actions.expandTable(table);
+      }
+    });
   }
 
   getDbList(dbs) {
@@ -123,6 +136,23 @@ export default class SqlEditorLeftBar extends React.PureComponent {
     this.props.actions.addTable(this.props.queryEditor, tableName, schemaName);
   }
 
+  renderExpandIconWithTooltip = ({ isActive }) => (
+    <IconTooltip
+      css={css`
+        transform: rotate(90deg);
+      `}
+      aria-label="Collapse"
+      tooltip={t(`${isActive ? 'Collapse' : 'Expand'} table preview`)}
+    >
+      <Icons.RightOutlined
+        iconSize="s"
+        css={css`
+          transform: ${isActive ? 'rotateY(180deg)' : ''};
+        `}
+      />
+    </IconTooltip>
+  );
+
   render() {
     const shouldShowReset = window.location.search === '?reset=1';
     const tableMetaDataHeight = this.props.height - 130; // 130 is the height of the selects above
@@ -147,8 +177,9 @@ export default class SqlEditorLeftBar extends React.PureComponent {
         <StyledScrollbarContainer>
           <StyledScrollbarContent contentHeight={tableMetaDataHeight}>
             <Collapse
-              ghost
-              expandIconPosition="right"
+              activeKey={this.props.tables
+                .filter(({ expanded }) => expanded)
+                .map(({ id }) => id)}
               css={theme => css`
                 .ant-collapse-item {
                   margin-bottom: ${theme.gridUnit * 3}px;
@@ -169,6 +200,10 @@ export default class SqlEditorLeftBar extends React.PureComponent {
                   }
                 }
               `}
+              expandIconPosition="right"
+              ghost
+              onChange={this.onToggleTable}
+              expandIcon={this.renderExpandIconWithTooltip}
             >
               {this.props.tables.map(table => (
                 <TableElement

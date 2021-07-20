@@ -44,9 +44,11 @@ function mapStateToProps(
     dashboardInfo,
     dashboardState,
     dashboardLayout,
+    dataMask,
     datasources,
     sliceEntities,
     nativeFilters,
+    common,
   },
   ownProps,
 ) {
@@ -60,12 +62,15 @@ function mapStateToProps(
   const formData = getFormDataWithExtraFilters({
     layout: dashboardLayout.present,
     chart,
+    // eslint-disable-next-line camelcase
+    chartConfiguration: dashboardInfo.metadata?.chart_configuration,
     charts: chartQueries,
     filters: getAppliedFilterValues(id),
     colorScheme,
     colorNamespace,
     sliceId: id,
     nativeFilters,
+    dataMask,
   });
 
   formData.dashboardId = dashboardInfo.id;
@@ -80,8 +85,12 @@ function mapStateToProps(
     editMode: dashboardState.editMode,
     isExpanded: !!dashboardState.expandedSlices[id],
     supersetCanExplore: !!dashboardInfo.superset_can_explore,
+    supersetCanShare: !!dashboardInfo.superset_can_share,
     supersetCanCSV: !!dashboardInfo.superset_can_csv,
     sliceCanEdit: !!dashboardInfo.slice_can_edit,
+    ownState: dataMask[id]?.ownState,
+    filterState: dataMask[id]?.filterState,
+    maxRows: common.conf.SQL_MAX_ROW,
   };
 }
 

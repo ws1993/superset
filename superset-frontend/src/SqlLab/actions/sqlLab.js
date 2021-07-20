@@ -60,6 +60,7 @@ export const QUERY_EDITOR_SET_SELECTED_TEXT = 'QUERY_EDITOR_SET_SELECTED_TEXT';
 export const QUERY_EDITOR_SET_FUNCTION_NAMES =
   'QUERY_EDITOR_SET_FUNCTION_NAMES';
 export const QUERY_EDITOR_PERSIST_HEIGHT = 'QUERY_EDITOR_PERSIST_HEIGHT';
+export const QUERY_EDITOR_TOGGLE_LEFT_BAR = 'QUERY_EDITOR_TOGGLE_LEFT_BAR';
 export const MIGRATE_QUERY_EDITOR = 'MIGRATE_QUERY_EDITOR';
 export const MIGRATE_TAB_HISTORY = 'MIGRATE_TAB_HISTORY';
 export const MIGRATE_TABLE = 'MIGRATE_TABLE';
@@ -249,18 +250,22 @@ export function queryFailed(query, msg, link, errors) {
           })
         : Promise.resolve();
 
-    return sync
-      .then(() => dispatch({ type: QUERY_FAILED, query, msg, link, errors }))
-      .catch(() =>
-        dispatch(
-          addDangerToast(
-            t(
-              'An error occurred while storing the latest query id in the backend. ' +
-                'Please contact your administrator if this problem persists.',
+    return (
+      sync
+        .catch(() =>
+          dispatch(
+            addDangerToast(
+              t(
+                'An error occurred while storing the latest query id in the backend. ' +
+                  'Please contact your administrator if this problem persists.',
+              ),
             ),
           ),
-        ),
-      );
+        )
+        // We should always show the error message, even if we couldn't sync the
+        // state to the backend
+        .then(() => dispatch({ type: QUERY_FAILED, query, msg, link, errors }))
+    );
   };
 }
 
@@ -348,6 +353,13 @@ export function runQuery(query) {
           dispatch(queryFailed(query, message, error.link, error.errors));
         }),
       );
+  };
+}
+
+export function reRunQuery(query) {
+  // run Query with a new id
+  return function (dispatch) {
+    dispatch(runQuery({ ...query, id: shortid.generate() }));
   };
 }
 
@@ -637,6 +649,7 @@ export function switchQueryEditor(queryEditor, displayLimit) {
               errors: [],
               completed: false,
             },
+            hideLeftBar: json.hide_left_bar,
           };
           dispatch(loadQueryEditor(loadedQueryEditor));
           dispatch(setTables(json.table_schemas || []));
@@ -661,6 +674,36 @@ export function switchQueryEditor(queryEditor, displayLimit) {
 
 export function setActiveSouthPaneTab(tabId) {
   return { type: SET_ACTIVE_SOUTHPANE_TAB, tabId };
+}
+
+export function toggleLeftBar(queryEditor) {
+  const hideLeftBar = !queryEditor.hideLeftBar;
+  return function (dispatch) {
+    const sync = isFeatureEnabled(FeatureFlag.SQLLAB_BACKEND_PERSISTENCE)
+      ? SupersetClient.put({
+          endpoint: encodeURI(`/tabstateview/${queryEditor.id}`),
+          postPayload: { hide_left_bar: hideLeftBar },
+        })
+      : Promise.resolve();
+
+    return sync
+      .then(() =>
+        dispatch({
+          type: QUERY_EDITOR_TOGGLE_LEFT_BAR,
+          queryEditor,
+          hideLeftBar,
+        }),
+      )
+      .catch(() =>
+        dispatch(
+          addDangerToast(
+            t(
+              'An error occurred while hiding the left bar. Please contact your administrator.',
+            ),
+          ),
+        ),
+      );
+  };
 }
 
 export function removeQueryEditor(queryEditor) {
@@ -858,7 +901,7 @@ export function queryEditorSetSql(queryEditor, sql) {
     const sync = isFeatureEnabled(FeatureFlag.SQLLAB_BACKEND_PERSISTENCE)
       ? SupersetClient.put({
           endpoint: encodeURI(`/tabstateview/${queryEditor.id}`),
-          postPayload: { sql },
+          postPayload: { sql, latest_query_id: queryEditor.latestQueryId },
         })
       : Promise.resolve();
 
@@ -948,10 +991,9 @@ export function mergeTable(table, query) {
 function getTableMetadata(table, query, dispatch) {
   return SupersetClient.get({
     endpoint: encodeURI(
-      `/api/v1/database/${query.dbId}/table/` +
-        `${encodeURIComponent(table.name)}/${encodeURIComponent(
-          table.schema,
-        )}/`,
+      `/api/v1/database/${query.dbId}/table/${encodeURIComponent(
+        table.name,
+      )}/${encodeURIComponent(table.schema)}/`,
     ),
   })
     .then(({ json }) => {
@@ -1032,7 +1074,7 @@ export function addTable(query, tableName, schemaName) {
         ...table,
         isMetadataLoading: true,
         isExtraMetadataLoading: true,
-        expanded: false,
+        expanded: true,
       }),
     );
 

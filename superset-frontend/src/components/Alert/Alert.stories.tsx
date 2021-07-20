@@ -63,21 +63,27 @@ export const AlertGallery = () => (
 AlertGallery.story = {
   parameters: {
     actions: {
-      disabled: true,
+      disable: true,
     },
     controls: {
-      disabled: true,
+      disable: true,
     },
     knobs: {
-      disabled: true,
+      disable: true,
     },
   },
 };
 
-export const InteractiveAlert = (args: AlertProps) => <Alert {...args} />;
+export const InteractiveAlert = (args: AlertProps) => (
+  <>
+    <Alert {...args} />
+    Some content to test the `roomBelow` prop
+  </>
+);
 
 InteractiveAlert.args = {
   closable: true,
+  roomBelow: false,
   type: 'info',
   message: smallText,
   description: bigText,
@@ -94,7 +100,7 @@ InteractiveAlert.argTypes = {
 InteractiveAlert.story = {
   parameters: {
     knobs: {
-      disabled: true,
+      disable: true,
     },
   },
 };

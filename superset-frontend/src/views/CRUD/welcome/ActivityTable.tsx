@@ -16,17 +16,20 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import moment from 'moment';
 import { styled, t } from '@superset-ui/core';
+import { setInLocalStorage } from 'src/utils/localStorageHelpers';
 
 import Loading from 'src/components/Loading';
 import ListViewCard from 'src/components/ListViewCard';
 import SubMenu from 'src/components/Menu/SubMenu';
+import { mq, CardStyles, getEditedObjects } from 'src/views/CRUD/utils';
+import { HOMEPAGE_ACTIVITY_FILTER } from 'src/views/CRUD/storageKeys';
 import { Chart } from 'src/types/Chart';
 import { Dashboard, SavedQueryObject } from 'src/views/CRUD/types';
-import { mq, CardStyles } from 'src/views/CRUD/utils';
 
+import Icons from 'src/components/Icons';
 import { ActivityData } from './Welcome';
 import EmptyState from './EmptyState';
 
@@ -50,6 +53,12 @@ interface RecentDashboard extends RecentActivity {
   item_type: 'dashboard';
 }
 
+enum SetTabType {
+  EDITED = 'Edited',
+  CREATED = 'Created',
+  VIEWED = 'Viewed',
+  EXAMPLE = 'Examples',
+}
 /**
  * Recent activity objects fetched by `getRecentAcitivtyObjs`.
  */
@@ -66,8 +75,8 @@ interface ActivityProps {
   };
   activeChild: string;
   setActiveChild: (arg0: string) => void;
-  loading: boolean;
   activityData: ActivityData;
+  loadedCount: number;
 }
 
 const ActivityContainer = styled.div`
@@ -75,15 +84,7 @@ const ActivityContainer = styled.div`
   margin-top: ${({ theme }) => theme.gridUnit * -4}px;
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(31%, max-content));
-  ${[mq[3]]} {
-    grid-template-columns: repeat(auto-fit, minmax(31%, max-content));
-  }
-  ${[mq[2]]} {
-    grid-template-columns: repeat(auto-fit, minmax(42%, max-content));
-  }
-  ${[mq[1]]} {
-    grid-template-columns: repeat(auto-fit, minmax(63%, max-content));
-  }
+
   grid-gap: ${({ theme }) => theme.gridUnit * 8}px;
   justify-content: left;
   padding: ${({ theme }) => theme.gridUnit * 6}px;
@@ -91,9 +92,19 @@ const ActivityContainer = styled.div`
   .ant-card-meta-avatar {
     margin-top: ${({ theme }) => theme.gridUnit * 3}px;
     margin-left: ${({ theme }) => theme.gridUnit * 2}px;
+    color: ${({ theme }) => theme.colors.grayscale.base};
   }
   .ant-card-meta-title {
     font-weight: ${({ theme }) => theme.typography.weights.bold};
+  }
+  ${mq[3]} {
+    grid-template-columns: repeat(auto-fit, minmax(31%, max-content));
+  }
+  ${mq[2]} {
+    grid-template-columns: repeat(auto-fit, minmax(42%, max-content));
+  }
+  ${mq[1]} {
+    grid-template-columns: repeat(auto-fit, minmax(80%, max-content));
   }
 `;
 
@@ -107,16 +118,16 @@ const getEntityTitle = (entity: ActivityObject) => {
   return entity.item_title || UNTITLED;
 };
 
-const getEntityIconName = (entity: ActivityObject) => {
-  if ('sql' in entity) return 'sql';
+const getEntityIcon = (entity: ActivityObject) => {
+  if ('sql' in entity) return <Icons.Sql />;
   const url = 'item_url' in entity ? entity.item_url : entity.url;
   if (url?.includes('dashboard')) {
-    return 'nav-dashboard';
+    return <Icons.NavDashboard />;
   }
   if (url?.includes('explore')) {
-    return 'nav-charts';
+    return <Icons.NavCharts />;
   }
-  return '';
+  return null;
 };
 
 const getEntityUrl = (entity: ActivityObject) => {
@@ -156,17 +167,37 @@ const getEntityLastActionOn = (entity: ActivityObject) => {
 };
 
 export default function ActivityTable({
-  loading,
   activeChild,
   setActiveChild,
   activityData,
+  user,
+  loadedCount,
 }: ActivityProps) {
+  const [editedObjs, setEditedObjs] = useState<Array<ActivityData>>();
+  const [loadingState, setLoadingState] = useState(false);
+
+  const getEditedCards = () => {
+    setLoadingState(true);
+    getEditedObjects(user.userId).then(r => {
+      setEditedObjs([...r.editedChart, ...r.editedDash]);
+      setLoadingState(false);
+    });
+  };
+
+  useEffect(() => {
+    if (activeChild === 'Edited') {
+      setLoadingState(true);
+      getEditedCards();
+    }
+  }, [activeChild]);
+
   const tabs = [
     {
       name: 'Edited',
       label: t('Edited'),
       onClick: () => {
         setActiveChild('Edited');
+        setInLocalStorage(HOMEPAGE_ACTIVITY_FILTER, SetTabType.EDITED);
       },
     },
     {
@@ -174,6 +205,7 @@ export default function ActivityTable({
       label: t('Created'),
       onClick: () => {
         setActiveChild('Created');
+        setInLocalStorage(HOMEPAGE_ACTIVITY_FILTER, SetTabType.CREATED);
       },
     },
   ];
@@ -184,6 +216,7 @@ export default function ActivityTable({
       label: t('Viewed'),
       onClick: () => {
         setActiveChild('Viewed');
+        setInLocalStorage(HOMEPAGE_ACTIVITY_FILTER, SetTabType.VIEWED);
       },
     });
   } else {
@@ -192,49 +225,50 @@ export default function ActivityTable({
       label: t('Examples'),
       onClick: () => {
         setActiveChild('Examples');
+        setInLocalStorage(HOMEPAGE_ACTIVITY_FILTER, SetTabType.EXAMPLE);
       },
     });
   }
 
   const renderActivity = () =>
-    activityData[activeChild].map((entity: ActivityObject) => {
-      const url = getEntityUrl(entity);
-      const lastActionOn = getEntityLastActionOn(entity);
-      return (
-        <CardStyles
-          onClick={() => {
-            window.location.href = url;
-          }}
-          key={url}
-        >
-          <ListViewCard
-            loading={loading}
-            cover={<></>}
-            url={url}
-            title={getEntityTitle(entity)}
-            description={lastActionOn}
-            avatar={getEntityIconName(entity)}
-            actions={null}
-          />
-        </CardStyles>
-      );
-    });
+    (activeChild !== 'Edited' ? activityData[activeChild] : editedObjs).map(
+      (entity: ActivityObject) => {
+        const url = getEntityUrl(entity);
+        const lastActionOn = getEntityLastActionOn(entity);
+        return (
+          <CardStyles
+            onClick={() => {
+              window.location.href = url;
+            }}
+            key={url}
+          >
+            <ListViewCard
+              cover={<></>}
+              url={url}
+              title={getEntityTitle(entity)}
+              description={lastActionOn}
+              avatar={getEntityIcon(entity)}
+              actions={null}
+            />
+          </CardStyles>
+        );
+      },
+    );
 
-  if (loading) return <Loading position="inline" />;
+  const doneFetching = loadedCount < 3;
+
+  if ((loadingState && !editedObjs) || doneFetching) {
+    return <Loading position="inline" />;
+  }
   return (
     <>
-      <SubMenu
-        activeChild={activeChild}
-        // eslint-disable-next-line react/no-children-prop
-        tabs={tabs}
-      />
-      <>
-        {activityData[activeChild]?.length > 0 ? (
-          <ActivityContainer>{renderActivity()}</ActivityContainer>
-        ) : (
-          <EmptyState tableName="RECENTS" tab={activeChild} />
-        )}
-      </>
+      <SubMenu activeChild={activeChild} tabs={tabs} />
+      {activityData[activeChild]?.length > 0 ||
+      (activeChild === 'Edited' && editedObjs && editedObjs.length > 0) ? (
+        <ActivityContainer>{renderActivity()}</ActivityContainer>
+      ) : (
+        <EmptyState tableName="RECENTS" tab={activeChild} />
+      )}
     </>
   );
 }

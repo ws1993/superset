@@ -21,8 +21,11 @@ import { t, styled, supersetTheme } from '@superset-ui/core';
 
 import { Menu } from 'src/common/components';
 import Button, { ButtonProps } from 'src/components/Button';
-import Icon from 'src/components/Icon';
-import { DropdownButton, DropdownProps } from 'src/common/components/Dropdown';
+import Icons from 'src/components/Icons';
+import {
+  DropdownButton,
+  DropdownButtonProps,
+} from 'src/components/DropdownButton';
 
 interface Props {
   allowAsync: boolean;
@@ -34,7 +37,7 @@ interface Props {
   overlayCreateAsMenu: typeof Menu | null;
 }
 
-type QueryButtonProps = DropdownProps | ButtonProps;
+type QueryButtonProps = DropdownButtonProps | ButtonProps;
 
 const buildText = (
   shouldShowStopButton: boolean,
@@ -73,6 +76,10 @@ const StyledButton = styled.span`
     transition: background-color 0ms;
     &:last-of-type {
       margin-right: ${({ theme }) => theme.gridUnit * 2}px;
+    }
+    span[name='caret-down'] {
+      display: flex;
+      margin-right: ${({ theme }) => theme.gridUnit * -2}px;
     }
   }
 `;
@@ -113,8 +120,8 @@ const RunQueryActionButton = ({
           ? {
               overlay: overlayCreateAsMenu,
               icon: (
-                <Icon
-                  color={
+                <Icons.CaretDown
+                  iconColor={
                     isDisabled
                       ? supersetTheme.colors.grayscale.base
                       : supersetTheme.colors.grayscale.light5

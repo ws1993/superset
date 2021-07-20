@@ -19,14 +19,14 @@
 import { snakeCase } from 'lodash';
 import PropTypes from 'prop-types';
 import React from 'react';
-import { SuperChart, logging } from '@superset-ui/core';
+import { SuperChart, logging, Behavior } from '@superset-ui/core';
 import { Logger, LOG_ACTIONS_RENDER_CHART } from '../logger/LogUtils';
 
 const propTypes = {
   annotationData: PropTypes.object,
   actions: PropTypes.object,
   chartId: PropTypes.number.isRequired,
-  datasource: PropTypes.object.isRequired,
+  datasource: PropTypes.object,
   initialValues: PropTypes.object,
   formData: PropTypes.object.isRequired,
   height: PropTypes.number,
@@ -42,9 +42,10 @@ const propTypes = {
   refreshOverlayVisible: PropTypes.bool,
   // dashboard callbacks
   addFilter: PropTypes.func,
-  setExtraFormData: PropTypes.func,
+  setDataMask: PropTypes.func,
   onFilterMenuOpen: PropTypes.func,
   onFilterMenuClose: PropTypes.func,
+  ownState: PropTypes.object,
 };
 
 const BLANK = {};
@@ -74,12 +75,9 @@ class ChartRenderer extends React.Component {
       setControlValue: this.handleSetControlValue,
       onFilterMenuOpen: this.props.onFilterMenuOpen,
       onFilterMenuClose: this.props.onFilterMenuClose,
-      setExtraFormData: ({ extraFormData, currentState }) =>
-        this.props.actions?.setExtraFormData(
-          this.props.chartId,
-          extraFormData,
-          currentState,
-        ),
+      setDataMask: dataMask => {
+        this.props.actions?.updateDataMask(this.props.chartId, dataMask);
+      },
     };
   }
 
@@ -95,7 +93,10 @@ class ChartRenderer extends React.Component {
         nextProps.queriesResponse !== this.props.queriesResponse;
       return (
         this.hasQueryResponseChange ||
+        nextProps.datasource !== this.props.datasource ||
         nextProps.annotationData !== this.props.annotationData ||
+        nextProps.ownState !== this.props.ownState ||
+        nextProps.filterState !== this.props.filterState ||
         nextProps.height !== this.props.height ||
         nextProps.width !== this.props.width ||
         nextProps.triggerRender ||
@@ -185,6 +186,8 @@ class ChartRenderer extends React.Component {
       annotationData,
       datasource,
       initialValues,
+      ownState,
+      filterState,
       formData,
       queriesResponse,
     } = this.props;
@@ -221,10 +224,13 @@ class ChartRenderer extends React.Component {
         width={width}
         height={height}
         annotationData={annotationData}
-        datasource={datasource}
+        datasource={datasource || {}}
         initialValues={initialValues}
         formData={formData}
+        ownState={ownState}
+        filterState={filterState}
         hooks={this.hooks}
+        behaviors={[Behavior.INTERACTIVE_CHART]}
         queriesData={queriesResponse}
         onRenderSuccess={this.handleRenderSuccess}
         onRenderFailure={this.handleRenderFailure}
