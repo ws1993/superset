@@ -16,8 +16,8 @@
  * specific language governing permissions and limitations
  * under the License.
  */
+import { user } from 'src/SqlLab/fixtures';
 import dashboardInfo from './mockDashboardInfo';
-import { user } from '../javascripts/sqllab/fixtures';
 
 export default {
   active: true,
@@ -25,7 +25,6 @@ export default {
   crontab: '0 12 * * 1',
   dashboard: dashboardInfo.id,
   name: 'Weekly Report',
-  owners: [user.userId],
   recipients: [
     {
       recipient_config_json: {

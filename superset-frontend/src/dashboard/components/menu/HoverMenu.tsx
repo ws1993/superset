@@ -16,25 +16,77 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import React, { RefObject } from 'react';
+import { RefObject, ReactNode, useCallback, memo } from 'react';
+
+import { styled } from '@apache-superset/core/theme';
 import cx from 'classnames';
 
+import { HOVER_MENU_Z_INDEX } from 'src/dashboard/constants';
+
 interface HoverMenuProps {
-  position: 'left' | 'top';
-  innerRef: RefObject<HTMLDivElement>;
-  children: React.ReactNode;
+  position?: 'left' | 'top';
+  innerRef?: RefObject<HTMLDivElement> | null;
+  children?: ReactNode;
+  onHover?: (data: { isHovered: boolean }) => void;
 }
 
-export default class HoverMenu extends React.PureComponent<HoverMenuProps> {
-  static defaultProps = {
-    position: 'left',
-    innerRef: null,
-    children: null,
-  };
+const HoverStyleOverrides = styled.div`
+  .hover-menu {
+    opacity: 0;
+    position: absolute;
+    z-index: ${HOVER_MENU_Z_INDEX};
+    font-size: ${({ theme }) => theme.fontSize};
+  }
 
-  render() {
-    const { innerRef, position, children } = this.props;
-    return (
+  .hover-menu--left {
+    width: ${({ theme }) => theme.sizeUnit * 6}px;
+    top: 50%;
+    transform: translate(0, -50%);
+    left: ${({ theme }) => theme.sizeUnit * -7}px;
+    padding: ${({ theme }) => theme.sizeUnit * 2}px 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+  }
+
+  .hover-menu--left > :nth-child(n):not(:only-child):not(:last-child) {
+    margin-bottom: ${({ theme }) => theme.sizeUnit * 3}px;
+  }
+
+  .hover-menu--top {
+    height: ${({ theme }) => theme.sizeUnit * 6}px;
+    top: ${({ theme }) => theme.sizeUnit * -6}px;
+    left: 50%;
+    transform: translate(-50%);
+    padding: 0;
+    display: flex;
+    flex-direction: row;
+    justify-content: center;
+    align-items: center;
+  }
+`;
+
+function HoverMenu({
+  position = 'left',
+  innerRef = null,
+  children = null,
+  onHover,
+}: HoverMenuProps) {
+  const handleMouseEnter = useCallback(() => {
+    if (onHover) {
+      onHover({ isHovered: true });
+    }
+  }, [onHover]);
+
+  const handleMouseLeave = useCallback(() => {
+    if (onHover) {
+      onHover({ isHovered: false });
+    }
+  }, [onHover]);
+
+  return (
+    <HoverStyleOverrides className="hover-menu-container">
       <div
         ref={innerRef}
         className={cx(
@@ -42,9 +94,14 @@ export default class HoverMenu extends React.PureComponent<HoverMenuProps> {
           position === 'left' && 'hover-menu--left',
           position === 'top' && 'hover-menu--top',
         )}
+        onMouseEnter={handleMouseEnter}
+        onMouseLeave={handleMouseLeave}
+        data-test="hover-menu"
       >
         {children}
       </div>
-    );
-  }
+    </HoverStyleOverrides>
+  );
 }
+
+export default memo(HoverMenu);

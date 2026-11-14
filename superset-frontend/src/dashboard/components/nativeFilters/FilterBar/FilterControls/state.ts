@@ -16,29 +16,49 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import { useSelector } from 'react-redux';
-import { NativeFiltersState } from 'src/dashboard/reducers/types';
-import { DataMaskStateWithId } from 'src/dataMask/types';
-import { ExtraFormData } from '@superset-ui/core';
+import { useMemo } from 'react';
+import { shallowEqual, useSelector } from 'react-redux';
+import { DataMaskStateWithId, ExtraFormData } from '@superset-ui/core';
+import { RootState } from 'src/dashboard/types';
 import { mergeExtraFormData } from '../../utils';
+import {
+  FilterConfigMap,
+  resolveTransitiveParentIds,
+} from '../../dependencyGraph';
 
-// eslint-disable-next-line import/prefer-default-export
-export function useCascadingFilters(
+/**
+ * Resolve the transitive ancestor ids for a given filter from the live
+ * native-filter configuration in Redux. Shared between
+ * `useFilterDependencies` and the readiness guard in `FilterValue` so they
+ * always agree on which parents count.
+ */
+export function useTransitiveParentIds(id: string): string[] {
+  const filterConfig = useSelector<RootState, FilterConfigMap | undefined>(
+    state => state.nativeFilters?.filters,
+    shallowEqual,
+  );
+
+  return useMemo(
+    () => resolveTransitiveParentIds(id, filterConfig ?? {}),
+    [id, filterConfig],
+  );
+}
+
+export function useFilterDependencies(
   id: string,
   dataMaskSelected?: DataMaskStateWithId,
 ): ExtraFormData {
-  const { filters } = useSelector<any, NativeFiltersState>(
-    state => state.nativeFilters,
-  );
-  const filter = filters[id];
-  const cascadeParentIds: string[] = filter?.cascadeParentIds ?? [];
-  let cascadedFilters = {};
-  cascadeParentIds.forEach(parentId => {
-    const parentState = dataMaskSelected?.[parentId];
-    cascadedFilters = mergeExtraFormData(
-      cascadedFilters,
-      parentState?.extraFormData,
-    );
-  });
-  return cascadedFilters;
+  const dependencyIds = useTransitiveParentIds(id);
+
+  return useMemo(() => {
+    let dependencies: ExtraFormData = {};
+    dependencyIds.forEach(parentId => {
+      const parentState = dataMaskSelected?.[parentId];
+      dependencies = mergeExtraFormData(
+        dependencies,
+        parentState?.extraFormData,
+      );
+    });
+    return dependencies;
+  }, [dataMaskSelected, dependencyIds]);
 }

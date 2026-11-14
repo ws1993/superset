@@ -19,53 +19,87 @@
 /* eslint-disable no-param-reassign */
 import { useSelector } from 'react-redux';
 import {
-  Filters,
-  FilterSets as FilterSetsType,
-} from 'src/dashboard/reducers/types';
-import {
   DataMaskState,
   DataMaskStateWithId,
   DataMaskWithId,
-} from 'src/dataMask/types';
-import { useEffect, useState } from 'react';
+  Filter,
+  Filters,
+} from '@superset-ui/core';
+import { useEffect, useMemo, useState } from 'react';
 import { ChartsState, RootState } from 'src/dashboard/types';
-import { NATIVE_FILTER_PREFIX } from '../FiltersConfigModal/utils';
-import { Filter } from '../types';
+import {
+  NATIVE_FILTER_PREFIX,
+  CHART_CUSTOMIZATION_PREFIX,
+  LEGACY_GROUPBY_PREFIX,
+  isNativeFilter,
+} from '../FiltersConfigModal/utils';
+import { useFilterConfiguration } from '../state';
 
-export const useFilterSets = () =>
-  useSelector<any, FilterSetsType>(
-    state => state.nativeFilters.filterSets || {},
+export const useFilters = () => {
+  const preselectedNativeFilters = useSelector<any, Filters>(
+    state => state.dashboardState?.preselectNativeFilters,
   );
+  const filterConfiguration = useFilterConfiguration();
 
-export const useFilters = () =>
-  useSelector<any, Filters>(state => {
-    const preselectNativeFilters =
-      state.dashboardState?.preselectNativeFilters || {};
-    return Object.entries(state.nativeFilters.filters).reduce(
-      (acc, [filterId, filter]: [string, Filter]) => ({
-        ...acc,
-        [filterId]: {
-          ...filter,
-          preselect: preselectNativeFilters[filterId],
-        },
-      }),
-      {} as Filters,
-    );
-  });
+  return useMemo(
+    () =>
+      filterConfiguration.reduce(
+        (acc, filter: Filter) => ({
+          ...acc,
+          [filter.id]: {
+            ...filter,
+            preselect: preselectedNativeFilters?.[filter.id],
+          },
+        }),
+        {} as Filters,
+      ),
+    [filterConfiguration, preselectedNativeFilters],
+  );
+};
 
 export const useNativeFiltersDataMask = () => {
   const dataMask = useSelector<RootState, DataMaskStateWithId>(
     state => state.dataMask,
   );
 
-  return Object.values(dataMask)
-    .filter((item: DataMaskWithId) =>
-      String(item.id).startsWith(NATIVE_FILTER_PREFIX),
-    )
-    .reduce(
-      (prev, next: DataMaskWithId) => ({ ...prev, [next.id]: next }),
-      {},
-    ) as DataMaskStateWithId;
+  const filteredMask = useMemo(
+    () =>
+      Object.values(dataMask)
+        .filter((item: DataMaskWithId) => isNativeFilter(String(item.id)))
+        .reduce(
+          (prev, next: DataMaskWithId) => ({ ...prev, [next.id]: next }),
+          {},
+        ) as DataMaskStateWithId,
+    [dataMask],
+  );
+
+  return filteredMask;
+};
+
+export const useAllAppliedDataMask = () => {
+  const dataMask = useSelector<RootState, DataMaskStateWithId>(
+    state => state.dataMask,
+  );
+
+  const allAppliedMask = useMemo(
+    () =>
+      Object.values(dataMask)
+        .filter((item: DataMaskWithId) => {
+          const id = String(item.id);
+          return (
+            id.startsWith(NATIVE_FILTER_PREFIX) ||
+            id.startsWith(CHART_CUSTOMIZATION_PREFIX) ||
+            id.startsWith(LEGACY_GROUPBY_PREFIX)
+          );
+        })
+        .reduce(
+          (prev, next: DataMaskWithId) => ({ ...prev, [next.id]: next }),
+          {},
+        ) as DataMaskStateWithId,
+    [dataMask],
+  );
+
+  return allAppliedMask;
 };
 
 export const useFilterUpdates = (
@@ -74,11 +108,12 @@ export const useFilterUpdates = (
 ) => {
   const filters = useFilters();
   const dataMaskApplied = useNativeFiltersDataMask();
-
   useEffect(() => {
-    // Remove deleted filters from local state
     Object.keys(dataMaskSelected).forEach(selectedId => {
-      if (!filters[selectedId]) {
+      const isChartCustomizationItem =
+        String(selectedId).startsWith(CHART_CUSTOMIZATION_PREFIX) ||
+        String(selectedId).startsWith(LEGACY_GROUPBY_PREFIX);
+      if (!isChartCustomizationItem && !filters[selectedId]) {
         setDataMaskSelected(draft => {
           delete draft[selectedId];
         });
@@ -105,7 +140,11 @@ export const useInitialization = () => {
       return;
     }
 
-    if (Object.values(filters).find(({ requiredFirst }) => requiredFirst)) {
+    if (
+      Object.values(filters).some(
+        filter => 'requiredFirst' in filter && filter.requiredFirst,
+      )
+    ) {
       setIsInitialized(true);
       return;
     }
@@ -119,7 +158,7 @@ export const useInitialization = () => {
       }, 1000);
     }
 
-    // @ts-ignore
+    // @ts-expect-error
     if (numberOfLoadingCharts > 0 && filterTimeout !== undefined) {
       clearTimeout(filterTimeout);
     }

@@ -16,81 +16,185 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import React from 'react';
-import { styled } from '@superset-ui/core';
-import { Form, FormItem } from 'src/components/Form';
-import FilterValue from './FilterValue';
-import { FilterProps } from './types';
+import { memo, useContext, useMemo, useState } from 'react';
+import {
+  createHtmlPortalNode,
+  InPortal,
+  OutPortal,
+} from 'react-reverse-portal';
+import { FilterBarOrientation } from 'src/dashboard/types';
+import { isChartCustomization } from '@superset-ui/core';
+import { ChartCustomizationPlugins } from 'src/constants';
+import { t } from '@apache-superset/core/translation';
 import { checkIsMissingRequiredValue } from '../utils';
+import FilterValue from './FilterValue';
+import { FilterCard } from '../../FilterCard';
+import { FilterBarScrollContext } from '../Vertical';
+import { FilterControlProps } from './types';
+import { FilterCardPlacement } from '../../FilterCard/types';
+import { isFilterWithoutScope, useIsFilterInScope } from '../../state';
+import {
+  FilterStyledIcon,
+  FilterControlTitleGroup,
+  RequiredFieldIndicator,
+  DescriptionToolTip,
+  OutOfScopeFilterToolTip,
+  DeckglLayerVisibilityTooltip,
+  useFilterControlDisplay,
+} from './FilterControlShared';
+import GroupByFilterCard from './GroupByFilterCard';
 
-const StyledIcon = styled.div`
-  position: absolute;
-  right: 0;
-`;
-
-const StyledFilterControlTitle = styled.h4`
-  font-size: ${({ theme }) => theme.typography.sizes.s}px;
-  color: ${({ theme }) => theme.colors.grayscale.dark1};
-  margin: 0;
-  overflow-wrap: break-word;
-`;
-
-const StyledFilterControlTitleBox = styled.div`
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: ${({ theme }) => theme.gridUnit}px;
-`;
-
-const StyledFilterControlContainer = styled(Form)`
-  width: 100%;
-  && .ant-form-item-label > label {
-    text-transform: none;
-    width: 100%;
-    padding-right: ${({ theme }) => theme.gridUnit * 11}px;
-  }
-`;
-
-const FilterControl: React.FC<FilterProps> = ({
+const FilterControl = ({
   dataMaskSelected,
   filter,
   icon,
   onFilterSelectionChange,
-  directPathToChild,
   inView,
-}) => {
+  showOverflow,
+  parentRef,
+  orientation = FilterBarOrientation.Vertical,
+  overflow = false,
+  clearAllTrigger,
+  onClearAllComplete,
+}: FilterControlProps) => {
+  const portalNode = useMemo(() => createHtmlPortalNode(), []);
+  const [isFilterActive, setIsFilterActive] = useState(false);
+
   const { name = '<undefined>' } = filter;
 
-  const isMissingRequiredValue = checkIsMissingRequiredValue(
-    filter,
-    filter.dataMask?.filterState,
+  const isFilterInScope = useIsFilterInScope();
+  const isMissingRequiredValue =
+    isFilterInScope(filter) &&
+    checkIsMissingRequiredValue(filter, filter.dataMask?.filterState);
+  const validateStatus = isMissingRequiredValue ? 'error' : undefined;
+  const isRequired = !!filter.controlValues?.enableEmptyFilter;
+  const inverseSelection = !!filter.controlValues?.inverseSelection;
+  const isOutOfScope = isFilterWithoutScope(filter);
+
+  const {
+    FilterControlContainer,
+    FormItem,
+    FilterControlTitleBox,
+    FilterControlTitle,
+  } = useFilterControlDisplay(orientation, overflow, inverseSelection);
+
+  const label = useMemo(
+    () => (
+      <FilterControlTitleBox>
+        <FilterControlTitleGroup data-test="filter-control-title-group">
+          <FilterControlTitle
+            id={`filter-name-${filter.id}`}
+            data-test="filter-control-name"
+          >
+            {name}
+          </FilterControlTitle>
+          {isRequired && <RequiredFieldIndicator />}
+          {isOutOfScope && <OutOfScopeFilterToolTip />}
+        </FilterControlTitleGroup>
+        {filter.filterType === 'filter_select' &&
+          filter.controlValues?.multiSelect && (
+            <DescriptionToolTip
+              description={t(
+                'When typing or pasting filter values, commas will separate values into multiple entries. To include a comma within a value, wrap it in double quotes: "San Francisco, CA"',
+              )}
+            />
+          )}
+        {filter.description?.trim() && (
+          <DescriptionToolTip description={filter.description} />
+        )}
+        {filter.filterType ===
+          ChartCustomizationPlugins.DeckglLayerVisibility && (
+          <DeckglLayerVisibilityTooltip />
+        )}
+        <FilterStyledIcon data-test="filter-icon">{icon}</FilterStyledIcon>
+      </FilterControlTitleBox>
+    ),
+    [
+      FilterControlTitleBox,
+      FilterControlTitle,
+      name,
+      isRequired,
+      filter.description,
+      filter.filterType,
+      filter.controlValues?.multiSelect,
+      icon,
+      isOutOfScope,
+    ],
   );
 
-  return (
-    <StyledFilterControlContainer layout="vertical">
-      <FormItem
-        label={
-          <StyledFilterControlTitleBox>
-            <StyledFilterControlTitle data-test="filter-control-name">
-              {name}
-            </StyledFilterControlTitle>
-            <StyledIcon data-test="filter-icon">{icon}</StyledIcon>
-          </StyledFilterControlTitleBox>
+  const isScrolling = useContext(FilterBarScrollContext);
+  const filterCardPlacement = useMemo(() => {
+    if (orientation === FilterBarOrientation.Horizontal) {
+      if (overflow) {
+        return FilterCardPlacement.Left;
+      }
+      return FilterCardPlacement.Bottom;
+    }
+    return FilterCardPlacement.Right;
+  }, [orientation, overflow]);
+
+  if (
+    isChartCustomization(filter) &&
+    filter.filterType === 'chart_customization_dynamic_groupby'
+  ) {
+    return (
+      <GroupByFilterCard
+        customizationItem={filter}
+        orientation={
+          orientation === FilterBarOrientation.Horizontal
+            ? 'horizontal'
+            : 'vertical'
         }
-        required={filter?.controlValues?.enableEmptyFilter}
-        validateStatus={isMissingRequiredValue ? 'error' : undefined}
-      >
+        dataMaskSelected={dataMaskSelected}
+        onFilterSelectionChange={onFilterSelectionChange}
+      />
+    );
+  }
+
+  return (
+    <>
+      <InPortal node={portalNode}>
         <FilterValue
           dataMaskSelected={dataMaskSelected}
           filter={filter}
-          directPathToChild={directPathToChild}
+          showOverflow={showOverflow}
           onFilterSelectionChange={onFilterSelectionChange}
           inView={inView}
+          parentRef={parentRef}
+          setFilterActive={setIsFilterActive}
+          orientation={orientation}
+          overflow={overflow}
+          validateStatus={validateStatus}
+          clearAllTrigger={clearAllTrigger}
+          onClearAllComplete={onClearAllComplete}
         />
-      </FormItem>
-    </StyledFilterControlContainer>
+      </InPortal>
+      <FilterControlContainer
+        layout={
+          orientation === FilterBarOrientation.Horizontal && !overflow
+            ? 'horizontal'
+            : 'vertical'
+        }
+      >
+        <FilterCard
+          filter={filter}
+          isVisible={!isFilterActive && !isScrolling}
+          placement={filterCardPlacement}
+        >
+          <div>
+            <FormItem
+              label={label}
+              htmlFor={filter.id}
+              required={filter?.controlValues?.enableEmptyFilter}
+              validateStatus={validateStatus}
+            >
+              <OutPortal node={portalNode} />
+            </FormItem>
+          </div>
+        </FilterCard>
+      </FilterControlContainer>
+    </>
   );
 };
 
-export default FilterControl;
+export default memo(FilterControl);
